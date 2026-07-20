@@ -1,0 +1,10 @@
+[package]
+name = "xmip-prepare"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/IlleNilsson/xmip-prepare"
+description = "Stream preparation before structural interpretation."
+
+[dependencies]
+xmip-stream = { git = "https://github.com/IlleNilsson/xmip-stream", rev = "3855d6b37988f0ff5962a27662824d5da20cce70" }
