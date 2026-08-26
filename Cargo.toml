@@ -2,12 +2,12 @@
 [workspace]
 
 [package]
-name = "xmip-prepare"
+name = "xmip-core-prepare"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
-repository = "https://github.com/IlleNilsson/xmip-prepare"
+repository = "https://github.com/IlleNilsson/xmip-core-prepare"
 description = "Stream preparation before structural interpretation."
 
 [dependencies]
-xmip-stream = { git = "https://github.com/IlleNilsson/xmip-stream", rev = "3855d6b37988f0ff5962a27662824d5da20cce70" }
+xmip-stream = { package = "xmip-core-stream", git = "https://github.com/IlleNilsson/xmip-core-stream", branch = "main" }
