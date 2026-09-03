@@ -10,7 +10,9 @@ pub struct PrepareError {
 }
 
 impl fmt::Display for PrepareError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(&self.message) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
 }
 
 impl Error for PrepareError {}
@@ -25,7 +27,9 @@ pub struct PreparePipeline {
 }
 
 impl PreparePipeline {
-    pub fn new(steps: Vec<Box<dyn PrepareStep>>) -> Self { Self { steps } }
+    pub fn new(steps: Vec<Box<dyn PrepareStep>>) -> Self {
+        Self { steps }
+    }
 
     pub fn execute(&self, input: &Stream) -> Result<Stream, PrepareError> {
         let mut current = input.clone();
