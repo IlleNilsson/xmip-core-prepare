@@ -2,7 +2,7 @@
 
 use std::error::Error;
 use std::fmt;
-use xmip_stream::Stream;
+use stream::Stream;
 
 #[derive(Debug)]
 pub struct PrepareError {

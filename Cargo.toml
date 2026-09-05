@@ -10,4 +10,4 @@ repository = "https://github.com/IlleNilsson/xmip-core-prepare"
 description = "Stream preparation before structural interpretation."
 
 [dependencies]
-xmip-stream = { package = "xmip-core-stream", git = "https://github.com/IlleNilsson/xmip-core-stream", branch = "main" }
+stream = { package = "xmip-core-stream", git = "https://github.com/IlleNilsson/xmip-core-stream", branch = "main" }
