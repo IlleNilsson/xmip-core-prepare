@@ -1,21 +1,8 @@
 #![forbid(unsafe_code)]
 
-use std::error::Error;
-use std::fmt;
 use stream::Stream;
 
-#[derive(Debug)]
-pub struct PrepareError {
-    pub message: String,
-}
-
-impl fmt::Display for PrepareError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl Error for PrepareError {}
+xcore::declare_error!(PrepareError);
 
 pub trait PrepareStep: Send + Sync {
     fn name(&self) -> &'static str;
