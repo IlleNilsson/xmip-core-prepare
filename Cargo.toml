@@ -7,13 +7,51 @@ version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 repository = "https://github.com/IlleNilsson/xmip-core-prepare"
-description = "Stream preparation before structural interpretation."
+description = "Stream preparation: the standard prepare units, streamed, at receive, process and send."
+
+[lib]
+# The engines mount beside this source (ADR-0049).
+path = ".src/lib.rs"
+
+[features]
+# The units' code and what it is built on. Without it the crate is its units'
+# declarations alone, which configure reads the standard module by.
+default = ["units"]
+units = ["dep:codec", "dep:flate2", "dep:ruzstd", "dep:encoding_rs"]
 
 [dependencies]
-stream = { package = "xmip-core-stream", git = "https://github.com/IlleNilsson/xmip-core-stream", branch = "main" }
-# The error is declared once, in core (ADR-0037); the tests also take a
-# StreamId from there.
+# The error is declared once, in core (ADR-0037), and a unit's settings in
+# its one shape.
 xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main" }
+# A unit as its crate declares it, and the stage of the message path it is
+# opened at.
+node = { package = "xmip-core-node", git = "https://github.com/IlleNilsson/xmip-core-node", branch = "main" }
+# Base 64 and the Unicode forms, spelled once for the estate.
+codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNilsson/xmip-core-library-codec", branch = "main", optional = true }
+# gzip, zlib and raw deflate, and the CRC-32 a zip entry is checked by, over
+# the pure-Rust backend (miniz_oxide): no C compiler, no unsafe of ours.
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"], optional = true }
+# zstd in Rust, both ways, where the zstd crate binds the C library.
+ruzstd = { version = "0.9", optional = true }
+# The WHATWG Encoding Standard's encodings, read and written a piece at a
+# time and strictly: what a legacy partner's text arrives in.
+encoding_rs = { version = "0.8", optional = true }
+
+[dev-dependencies]
+# The counting allocator and the one latency spread the estate's tests
+# measure with.
+xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main", features = ["test-support"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+too_many_lines = "warn"
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
+unwrap_used = "warn"
+expect_used = "allow"
 
 [profile.dev.package."*"]
 opt-level = 3

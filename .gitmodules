@@ -1,0 +1,3 @@
+[submodule "xmip-core-prepare-rpgp"]
+	path = rpgp
+	url = https://github.com/IlleNilsson/xmip-core-prepare-rpgp.git
