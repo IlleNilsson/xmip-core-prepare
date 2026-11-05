@@ -12,8 +12,9 @@
 
 use std::io::{self, BufRead, Read, Write};
 
-use flate2::Compression as Level;
+use flate2::{Compress, Decompress};
 
+use crate::deflate::{Checked, CrcReader, deflate, inflate};
 use crate::{PrepareError, copy};
 
 const LOCAL: u32 = 0x0403_4b50;
@@ -50,16 +51,19 @@ struct Local {
 }
 
 /// Write the entry `wanted` names, or the first, from the archive `input`
-/// to `output`, its check verified.
+/// to `output`, its check verified, a deflated entry inflated by
+/// `decompress` through `written`.
 ///
 /// # Errors
 /// The archive ends before such an entry, an entry is neither stored nor
 /// deflated, its data does not match its check, or it cannot be read.
 pub(crate) fn read_entry(
-    mut input: impl BufRead,
+    input: &mut dyn BufRead,
     wanted: Option<&str>,
+    (decompress, written): (&mut Decompress, &mut [u8]),
     output: &mut dyn Write,
 ) -> Result<u64, PrepareError> {
+    let mut input = input;
     loop {
         let signature = u32_le(&mut input)?;
         if signature != LOCAL {
@@ -79,10 +83,8 @@ pub(crate) fn read_entry(
                 )));
             }
             STORED => copy(NAME, &mut (&mut input).take(local.compressed), &mut checked)?,
-            DEFLATED => {
-                let mut decoder = flate2::bufread::DeflateDecoder::new(&mut input);
-                copy(NAME, &mut decoder, &mut checked)?
-            }
+            DEFLATED => inflate(decompress, false, written, &mut *input, &mut checked)
+                .map_err(|failed| PrepareError::of_io(NAME, &failed))?,
             other => {
                 return Err(refused(format!(
                     "the entry '{}' is compressed by method {other}, neither stored nor deflated",
@@ -166,14 +168,15 @@ fn descriptor(input: &mut impl Read, zip64: bool) -> Result<u32, PrepareError> {
 }
 
 /// Write `input` to `output` as an archive of one entry called `name`,
-/// deflated at `level`.
+/// deflated by `compress`, read through `read` and written through
+/// `written`.
 ///
 /// # Errors
 /// The entry is over 4 GiB, or reading or writing failed.
 pub(crate) fn write_entry(
     input: &mut dyn Read,
     name: &str,
-    level: Level,
+    (compress, read, written): (&mut Compress, &mut [u8], &mut [u8]),
     output: &mut dyn Write,
 ) -> Result<(), PrepareError> {
     let mut counted = Counted {
@@ -192,19 +195,11 @@ pub(crate) fn write_entry(
     header.extend_from_slice(name.as_bytes());
     write_all(&mut counted, &header)?;
 
-    let mut crc = flate2::Crc::new();
-    let mut original = 0u64;
-    let mut reading = CrcReader {
-        inner: input,
-        crc: &mut crc,
-        read: &mut original,
-    };
+    let mut reading = CrcReader::new(input);
     let before = counted.written;
-    let mut encoder = flate2::write::DeflateEncoder::new(&mut counted, level);
-    copy(NAME, &mut reading, &mut encoder)?;
-    encoder
-        .finish()
+    deflate(compress, read, written, &mut reading, &mut counted)
         .map_err(|failed| PrepareError::of_io(NAME, &failed))?;
+    let (crc, original) = (reading.crc, reading.read);
     let compressed = counted.written - before;
     let (compressed, original) = match (u32::try_from(compressed), u32::try_from(original)) {
         (Ok(compressed), Ok(original)) if original != u32::MAX && compressed != u32::MAX => {
@@ -281,38 +276,6 @@ fn write_all(output: &mut impl Write, bytes: &[u8]) -> Result<(), PrepareError> 
         .map_err(|failed| PrepareError::of_io(NAME, &failed))
 }
 
-/// The entry's bytes on their way out, checked as they pass: written to
-/// the output where the entry is the one chosen, and only checked where it
-/// is passed over.
-struct Checked<'a> {
-    output: Option<&'a mut dyn Write>,
-    crc: flate2::Crc,
-}
-
-impl<'a> Checked<'a> {
-    fn new(output: Option<&'a mut dyn Write>) -> Self {
-        Self {
-            output,
-            crc: flate2::Crc::new(),
-        }
-    }
-}
-
-impl Write for Checked<'_> {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        let written = match self.output.as_mut() {
-            Some(output) => output.write(bytes)?,
-            None => bytes.len(),
-        };
-        self.crc.update(&bytes[..written]);
-        Ok(written)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.output.as_mut().map_or(Ok(()), Write::flush)
-    }
-}
-
 /// The bytes written, counted.
 struct Counted<'a> {
     inner: &'a mut dyn Write,
@@ -328,21 +291,5 @@ impl Write for Counted<'_> {
 
     fn flush(&mut self) -> io::Result<()> {
         self.inner.flush()
-    }
-}
-
-/// The bytes read, checked as they pass.
-struct CrcReader<'a> {
-    inner: &'a mut dyn Read,
-    crc: &'a mut flate2::Crc,
-    read: &'a mut u64,
-}
-
-impl Read for CrcReader<'_> {
-    fn read(&mut self, into: &mut [u8]) -> io::Result<usize> {
-        let read = self.inner.read(into)?;
-        self.crc.update(&into[..read]);
-        *self.read += read as u64;
-        Ok(read)
     }
 }

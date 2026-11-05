@@ -8,6 +8,7 @@ use std::io::{Read, Write};
 
 use crate::declaration::{TEXT_NORMALIZATION as NAME, TEXT_NORMALIZATION_UNIT};
 use crate::{CHUNK, Prepare, PrepareError, PrepareUnit, Stage, Values};
+use xcore::kept::Kept;
 
 const MARK: &[u8] = b"\xEF\xBB\xBF";
 
@@ -31,6 +32,8 @@ enum Ending {
 struct TextNormalization {
     mark: Mark,
     ending: Ending,
+    /// The piece read and the piece written, kept between Streams.
+    kept: Kept<(Vec<u8>, Vec<u8>)>,
 }
 
 // The shape every unit's open has (`node::unit::Unit`); this one refuses
@@ -48,6 +51,7 @@ fn open(_: Stage, values: &Values) -> Result<Box<dyn Prepare>, String> {
             "crlf" => Ending::CrLf,
             _ => Ending::Keep,
         },
+        kept: Kept::new(|| (vec![0u8; CHUNK], Vec::with_capacity(CHUNK + CHUNK / 2))),
     }))
 }
 
@@ -57,8 +61,20 @@ impl Prepare for TextNormalization {
         input: &mut (dyn Read + Send),
         output: &mut dyn Write,
     ) -> Result<(), PrepareError> {
+        self.kept
+            .with(|(chunk, written)| self.normalize(chunk, written, input, output))
+    }
+}
+
+impl TextNormalization {
+    fn normalize(
+        &self,
+        chunk: &mut [u8],
+        written: &mut Vec<u8>,
+        input: &mut dyn Read,
+        output: &mut dyn Write,
+    ) -> Result<(), PrepareError> {
         let failed = |failed: std::io::Error| PrepareError::of_io(NAME, &failed);
-        let mut chunk = vec![0u8; CHUNK];
         let mut held = 0;
         // The first three bytes decide the mark; a short Stream is all of it.
         while held < MARK.len() {
@@ -80,16 +96,15 @@ impl Prepare for TextNormalization {
         let mut lines = Lines {
             ending: self.ending,
             after_cr: false,
-            written: Vec::with_capacity(CHUNK + CHUNK / 2),
+            written,
         };
-        let mut piece = &chunk[skip..held];
+        lines.write(&chunk[skip..held], output).map_err(failed)?;
         loop {
-            lines.write(piece, output).map_err(failed)?;
-            let read = input.read(&mut chunk).map_err(failed)?;
+            let read = input.read(chunk).map_err(failed)?;
             if read == 0 {
                 break;
             }
-            piece = &chunk[..read];
+            lines.write(&chunk[..read], output).map_err(failed)?;
         }
         lines.finish(output).map_err(failed)
     }
@@ -97,13 +112,13 @@ impl Prepare for TextNormalization {
 
 /// Line endings rewritten across pieces: a CR at the end of one piece is
 /// held until the next says whether an LF follows it.
-struct Lines {
+struct Lines<'a> {
     ending: Ending,
     after_cr: bool,
-    written: Vec<u8>,
+    written: &'a mut Vec<u8>,
 }
 
-impl Lines {
+impl Lines<'_> {
     fn write(&mut self, piece: &[u8], output: &mut dyn Write) -> std::io::Result<()> {
         if self.ending == Ending::Keep {
             return output.write_all(piece);
@@ -120,7 +135,7 @@ impl Lines {
             }
             self.after_cr = byte == b'\r';
         }
-        output.write_all(&self.written)
+        output.write_all(self.written)
     }
 
     fn finish(&mut self, output: &mut dyn Write) -> std::io::Result<()> {

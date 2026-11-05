@@ -8,6 +8,7 @@ use std::io::{Read, Write};
 use crate::declaration::{TRANSFER_ENCODING as NAME, TRANSFER_ENCODING_UNIT};
 use crate::direction::Direction;
 use crate::{CHUNK, Prepare, PrepareError, PrepareUnit, Stage, Values};
+use xcore::kept::Kept;
 
 /// Transfer encoding, as the standard module declares it.
 pub const UNIT: PrepareUnit = PrepareUnit::new(TRANSFER_ENCODING_UNIT, open);
@@ -16,6 +17,22 @@ struct TransferEncoding {
     url: bool,
     line: usize,
     direction: Direction,
+    kept: Kept<Pieces>,
+}
+
+/// The piece read and the text spelled, kept between Streams.
+struct Pieces {
+    read: Vec<u8>,
+    text: String,
+}
+
+impl Pieces {
+    fn new() -> Self {
+        Self {
+            read: vec![0u8; CHUNK],
+            text: String::with_capacity(CHUNK + CHUNK / 2),
+        }
+    }
 }
 
 fn open(stage: Stage, values: &Values) -> Result<Box<dyn Prepare>, String> {
@@ -23,6 +40,7 @@ fn open(stage: Stage, values: &Values) -> Result<Box<dyn Prepare>, String> {
         url: values.text("format") == "base64url",
         line: usize::try_from(values.integer("line_length")).unwrap_or(0),
         direction: Direction::of(NAME, stage, values, ["decode", "encode"])?,
+        kept: Kept::new(Pieces::new),
     }))
 }
 
@@ -36,23 +54,28 @@ impl Prepare for TransferEncoding {
         input: &mut (dyn Read + Send),
         output: &mut dyn Write,
     ) -> Result<(), PrepareError> {
-        match self.direction {
-            Direction::Inward => self.decode(input, output),
-            Direction::Outward => self.encode(input, output),
-        }
+        self.kept.with(|pieces| match self.direction {
+            Direction::Inward => self.decode(pieces, input, output),
+            Direction::Outward => self.encode(pieces, input, output),
+        })
     }
 }
 
 impl TransferEncoding {
     /// Spell the bytes three at a time, so every piece but the last ends
     /// on a whole group and only the last can carry padding.
-    fn encode(&self, input: &mut dyn Read, output: &mut dyn Write) -> Result<(), PrepareError> {
+    fn encode(
+        &self,
+        pieces: &mut Pieces,
+        input: &mut dyn Read,
+        output: &mut dyn Write,
+    ) -> Result<(), PrepareError> {
         let failed = |failed: std::io::Error| PrepareError::of_io(NAME, &failed);
-        let mut chunk = vec![0u8; CHUNK / 4 * 3];
+        let chunk = &mut pieces.read[..CHUNK / 4 * 3];
+        let lines = &mut pieces.text;
         let mut column = 0;
-        let mut lines = String::new();
         loop {
-            let held = fill(input, &mut chunk).map_err(failed)?;
+            let held = fill(input, chunk).map_err(failed)?;
             if held == 0 {
                 break;
             }
@@ -84,14 +107,22 @@ impl TransferEncoding {
 
     /// Read the text four characters at a time, line breaks stepped over
     /// as MIME wraps it; anything after the padding is refused.
-    fn decode(&self, input: &mut dyn Read, output: &mut dyn Write) -> Result<(), PrepareError> {
+    fn decode(
+        &self,
+        pieces: &mut Pieces,
+        input: &mut dyn Read,
+        output: &mut dyn Write,
+    ) -> Result<(), PrepareError> {
         let failed = |failed: std::io::Error| PrepareError::of_io(NAME, &failed);
-        let mut chunk = vec![0u8; CHUNK];
-        let mut digits = String::with_capacity(CHUNK + 4);
+        let Pieces {
+            read: chunk,
+            text: digits,
+        } = pieces;
+        digits.clear();
         let mut padded = false;
         let mut read_so_far = 0u64;
         loop {
-            let read = input.read(&mut chunk).map_err(failed)?;
+            let read = input.read(chunk).map_err(failed)?;
             for &byte in &chunk[..read] {
                 if byte == b'\r' || byte == b'\n' {
                     continue;

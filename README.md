@@ -31,16 +31,27 @@ carries 64 MiB through each both ways, the two ends joined by a pipe, with
 what the process holds counted (`xcore::held`) and under 16 MiB, and a
 kilobyte through each within the millisecond rule.
 
+**A step keeps what it works in.** Its pieces, its compressor and its
+decoder are made on its first Stream and reset for each after it
+(`xcore::kept`), never made again: until 2026-11-05 every Stream made its
+own, zlib built about 200 KiB of tables to compress a kilobyte, and once
+state that large was freed, every unit after it paid for fresh pages. A
+kilobyte both ways went from 100–360 µs to 4–40 µs. zstd's compressor is
+the one exception: `ruzstd` makes it for every Stream and gives no way to
+keep it.
+
 **Strict.** Character Encoding refuses bytes that are not the named
 encoding and a character it cannot write, never replacing one (ADR-0038,
 amendment 2026-09-26); Transfer Encoding refuses a character outside its
 alphabet and anything after the padding; Compression refuses what is not
 compressed as named and a zip entry that does not match its check.
 
-**Its dependencies, each chosen.** gzip, zlib and raw deflate are
-`flate2`'s over its pure-Rust backend; zstd is `ruzstd`'s, Rust both ways,
-where the `zstd` crate binds the C library; a zip entry is read and written
-here (`zip.rs`) over `flate2`, one entry being one Stream; the WHATWG
+**Its dependencies, each chosen.** Deflate is `flate2`'s compressor and
+decompressor over its pure-Rust backend, driven here (`deflate.rs`) so a
+step keeps them; zlib's frame is the compressor's own, gzip's is written
+and read here (`gzip.rs`), and so is a zip entry (`zip.rs`), one entry
+being one Stream; zstd is `ruzstd`'s, Rust both ways, where the `zstd`
+crate binds the C library; the WHATWG
 encodings are `encoding_rs`'s; Base 64 and the Unicode forms are
 `xmip-core-library-codec`'s. None reaches a network (ADR-0045, amendment
 2026-10-22).
@@ -54,4 +65,4 @@ is opened. Keys are files the step names; nothing is looked up over a
 network — no key server, no online revocation check.
 
 `doc/architecture/runtime-model.md` section 8 governs Preparation; ADR-0066,
-amendments 2026-10-22, the units; `architecture.toml` carries the maturity.
+amendments 2026-10-22, the units; `architecture.xmip` carries the maturity.

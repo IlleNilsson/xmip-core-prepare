@@ -26,7 +26,11 @@ pub mod character_encoding;
 #[cfg(feature = "units")]
 pub mod compression;
 #[cfg(feature = "units")]
+mod deflate;
+#[cfg(feature = "units")]
 mod direction;
+#[cfg(feature = "units")]
+mod gzip;
 #[cfg(feature = "units")]
 pub mod protection;
 #[cfg(feature = "units")]

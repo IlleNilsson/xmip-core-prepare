@@ -20,6 +20,7 @@ use encoding_rs::{DecoderResult, EncoderResult, Encoding};
 use crate::declaration::{CHARACTER_ENCODING as NAME, CHARACTER_ENCODING_UNIT};
 use crate::direction::Direction;
 use crate::{CHUNK, Prepare, PrepareError, PrepareUnit, Stage, Values};
+use xcore::kept::Kept;
 
 /// Character encoding, as the standard module declares it.
 pub const UNIT: PrepareUnit = PrepareUnit::new(CHARACTER_ENCODING_UNIT, open);
@@ -37,6 +38,26 @@ enum Named {
 struct CharacterEncoding {
     named: Named,
     direction: Direction,
+    kept: Kept<Pieces>,
+}
+
+/// What a step reads, writes and holds text in, kept between Streams.
+struct Pieces {
+    read: Vec<u8>,
+    /// Room for a piece three times longer than read: the most UTF-8 a
+    /// byte of any encoding becomes.
+    written: Vec<u8>,
+    text: String,
+}
+
+impl Pieces {
+    fn new() -> Self {
+        Self {
+            read: vec![0u8; CHUNK],
+            written: vec![0u8; CHUNK * 3 + 16],
+            text: String::with_capacity(CHUNK),
+        }
+    }
 }
 
 fn open(stage: Stage, values: &Values) -> Result<Box<dyn Prepare>, String> {
@@ -66,7 +87,11 @@ fn open(stage: Stage, values: &Values) -> Result<Box<dyn Prepare>, String> {
             return Err(format!("{NAME}: '{label}' names no encoding"));
         }
     };
-    Ok(Box::new(CharacterEncoding { named, direction }))
+    Ok(Box::new(CharacterEncoding {
+        named,
+        direction,
+        kept: Kept::new(Pieces::new),
+    }))
 }
 
 fn refused(why: impl std::fmt::Display) -> PrepareError {
@@ -79,12 +104,16 @@ impl Prepare for CharacterEncoding {
         input: &mut (dyn Read + Send),
         output: &mut dyn Write,
     ) -> Result<(), PrepareError> {
-        match (self.named, self.direction) {
-            (Named::Standard(encoding), Direction::Inward) => decode(encoding, input, output),
-            (Named::Standard(encoding), Direction::Outward) => encode(encoding, input, output),
-            (Named::Form(form), Direction::Inward) => decode_form(form, input, output),
-            (Named::Form(form), Direction::Outward) => encode_form(form, input, output),
-        }
+        self.kept.with(|pieces| match (self.named, self.direction) {
+            (Named::Standard(encoding), Direction::Inward) => {
+                decode(encoding, pieces, input, output)
+            }
+            (Named::Standard(encoding), Direction::Outward) => {
+                encode(encoding, pieces, input, output)
+            }
+            (Named::Form(form), Direction::Inward) => decode_form(form, pieces, input, output),
+            (Named::Form(form), Direction::Outward) => encode_form(form, pieces, input, output),
+        })
     }
 }
 
@@ -94,20 +123,24 @@ fn io(failed: &std::io::Error) -> PrepareError {
 
 fn decode(
     encoding: &'static Encoding,
+    pieces: &mut Pieces,
     input: &mut dyn Read,
     output: &mut dyn Write,
 ) -> Result<(), PrepareError> {
     let mut decoder = encoding.new_decoder_without_bom_handling();
-    let mut chunk = vec![0u8; CHUNK];
-    let mut text = vec![0u8; CHUNK * 3 + 16];
+    let Pieces {
+        read: chunk,
+        written: text,
+        ..
+    } = pieces;
     let mut offset = 0u64;
     loop {
-        let read = input.read(&mut chunk).map_err(|failed| io(&failed))?;
+        let read = input.read(chunk).map_err(|failed| io(&failed))?;
         let last = read == 0;
         let mut rest = &chunk[..read];
         loop {
             let (result, consumed, written) =
-                decoder.decode_to_utf8_without_replacement(rest, &mut text, last);
+                decoder.decode_to_utf8_without_replacement(rest, text, last);
             output
                 .write_all(&text[..written])
                 .map_err(|failed| io(&failed))?;
@@ -133,16 +166,21 @@ fn decode(
 
 fn encode(
     encoding: &'static Encoding,
+    pieces: &mut Pieces,
     input: &mut dyn Read,
     output: &mut dyn Write,
 ) -> Result<(), PrepareError> {
     let mut encoder = encoding.new_encoder();
-    let mut pieces = Utf8Pieces::new();
-    let mut bytes = vec![0u8; CHUNK * 2 + 16];
-    while let Some((mut rest, last)) = pieces.next(input)? {
+    let Pieces {
+        read,
+        written: bytes,
+        text,
+    } = pieces;
+    let mut utf8 = Utf8Pieces::new(read, text);
+    while let Some((mut rest, last)) = utf8.next(input)? {
         loop {
             let (result, consumed, written) =
-                encoder.encode_from_utf8_without_replacement(rest, &mut bytes, last);
+                encoder.encode_from_utf8_without_replacement(rest, bytes, last);
             output
                 .write_all(&bytes[..written])
                 .map_err(|failed| io(&failed))?;
@@ -168,12 +206,13 @@ fn encode(
 
 fn decode_form(
     form: Form,
+    pieces: &mut Pieces,
     input: &mut dyn Read,
     output: &mut dyn Write,
 ) -> Result<(), PrepareError> {
     // A UTF-32 code unit is four bytes and stands alone, so a piece cut on
     // a multiple of four reads by itself.
-    let mut chunk = vec![0u8; CHUNK];
+    let chunk = &mut pieces.read;
     let mut held = 0;
     loop {
         let read = input
@@ -195,11 +234,12 @@ fn decode_form(
 
 fn encode_form(
     form: Form,
+    pieces: &mut Pieces,
     input: &mut dyn Read,
     output: &mut dyn Write,
 ) -> Result<(), PrepareError> {
-    let mut pieces = Utf8Pieces::new();
-    while let Some((piece, last)) = pieces.next(input)? {
+    let mut utf8 = Utf8Pieces::new(&mut pieces.read, &mut pieces.text);
+    while let Some((piece, last)) = utf8.next(input)? {
         output
             .write_all(&form.encode(piece))
             .map_err(|failed| io(&failed))?;
@@ -212,20 +252,21 @@ fn encode_form(
 
 /// UTF-8 read a piece at a time, each piece cut on a whole character, so
 /// a character never straddles two.
-struct Utf8Pieces {
-    chunk: Vec<u8>,
+struct Utf8Pieces<'a> {
+    chunk: &'a mut [u8],
     held: usize,
     offset: u64,
-    text: String,
+    text: &'a mut String,
 }
 
-impl Utf8Pieces {
-    fn new() -> Self {
+impl<'a> Utf8Pieces<'a> {
+    /// Read into `chunk`, each piece held in `text`.
+    fn new(chunk: &'a mut [u8], text: &'a mut String) -> Self {
         Self {
-            chunk: vec![0u8; CHUNK],
+            chunk,
             held: 0,
             offset: 0,
-            text: String::new(),
+            text,
         }
     }
 
@@ -254,7 +295,7 @@ impl Utf8Pieces {
         self.chunk.copy_within(whole..total, 0);
         self.held = total - whole;
         self.offset += whole as u64;
-        Ok(Some((&self.text, last)))
+        Ok(Some((self.text, last)))
     }
 }
 
