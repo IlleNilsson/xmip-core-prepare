@@ -126,7 +126,7 @@ fn local_header(input: &mut impl Read) -> Result<Local, PrepareError> {
         method: field16(4),
         crc: field32(10),
         compressed: zip64.unwrap_or(stated),
-        name: String::from_utf8_lossy(&name).into_owned(),
+        name: String::from_utf8_lossy_owned(name),
         zip64: zip64.is_some(),
     })
 }
