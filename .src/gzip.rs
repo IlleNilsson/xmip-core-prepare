@@ -8,6 +8,12 @@ use flate2::{Compress, Compression as Level, Decompress};
 
 use crate::PrepareError;
 use crate::deflate::{Checked, CrcReader, deflate, inflate};
+use crate::limit::Tally;
+
+/// The most bytes a member's name or comment is read to: FNAME and
+/// FCOMMENT end at a NUL (section 2.3.1), and a Stream without one would
+/// otherwise be held whole looking for it.
+const MOST_TEXT: u64 = 64 * 1024;
 
 const NAME: &str = crate::declaration::COMPRESSION;
 
@@ -76,21 +82,23 @@ pub(crate) fn write_member(
     output.flush().map_err(|error| failed(&error))
 }
 
-/// Write every member of the gzip Stream `input` to `output`, as one.
+/// Write every member of the gzip Stream `input` to `output`, as one, all
+/// of them counted against the one `tally`.
 ///
 /// # Errors
 /// The Stream is not gzip, a member does not match its check or length,
-/// it ends inside a member, or reading or writing failed.
+/// it ends inside a member, the members make more than `tally`'s limit
+/// allows, or reading or writing failed.
 pub(crate) fn read_members(
     decompress: &mut Decompress,
-    written: &mut [u8],
+    (written, tally): (&mut [u8], &Tally),
     input: &mut dyn BufRead,
     output: &mut dyn Write,
 ) -> Result<(), PrepareError> {
     loop {
         header(input)?;
         let mut checked = Checked::new(Some(&mut *output));
-        let length = inflate(decompress, false, written, input, &mut checked)
+        let length = inflate(decompress, false, (written, tally), input, &mut checked)
             .map_err(|error| failed(&error))?;
         let mut trailer = [0u8; 8];
         input
@@ -134,11 +142,15 @@ fn header(input: &mut dyn BufRead) -> Result<(), PrepareError> {
     for field in [FILE_NAME, COMMENT] {
         if flags & field != 0 {
             let mut ended = Vec::new();
-            input
+            Read::take(&mut *input, MOST_TEXT)
                 .read_until(0, &mut ended)
                 .map_err(|error| failed(&error))?;
             if ended.last() != Some(&0) {
-                return Err(refused("the gzip Stream ends inside a member"));
+                return Err(refused(if ended.len() as u64 == MOST_TEXT {
+                    "a gzip member's name or comment runs past 64 KiB"
+                } else {
+                    "the gzip Stream ends inside a member"
+                }));
             }
         }
     }

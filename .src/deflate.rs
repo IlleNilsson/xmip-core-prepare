@@ -13,6 +13,8 @@ use std::io::{self, BufRead, Read, Write};
 
 use flate2::{Compress, Crc, Decompress, FlushCompress, FlushDecompress, Status};
 
+use crate::limit::Tally;
+
 /// Compress all of `input` into `output`, read through `read` and written
 /// through `written`.
 ///
@@ -57,15 +59,16 @@ pub(crate) fn deflate(
 }
 
 /// Decompress one deflate stream from `input` into `output`, leaving in
-/// `input` whatever follows the stream; how much it held.
+/// `input` whatever follows the stream; how much it held. Every piece is
+/// counted against `tally` before it is written.
 ///
 /// # Errors
-/// The stream is not deflate, ends before its end, or reading or writing
-/// failed.
+/// The stream is not deflate, ends before its end, makes more than
+/// `tally`'s limit allows, or reading or writing failed.
 pub(crate) fn inflate(
     decompress: &mut Decompress,
     zlib: bool,
-    written: &mut [u8],
+    (written, tally): (&mut [u8], &Tally),
     input: &mut dyn BufRead,
     output: &mut dyn Write,
 ) -> io::Result<u64> {
@@ -81,6 +84,7 @@ pub(crate) fn inflate(
         let used = moved(before_in, decompress.total_in());
         let made = moved(before_out, decompress.total_out());
         input.consume(used);
+        tally.add(used, made)?;
         output.write_all(&written[..made])?;
         total += made as u64;
         if status == Status::StreamEnd {
@@ -183,10 +187,11 @@ mod tests {
             let mut source = &packed[..];
             let mut reading = Reading::new(&mut source, &mut read);
             let mut back = Vec::new();
+            let tally = Tally::new(crate::limit::Limit::new(1 << 20, 1));
             inflate(
                 &mut decompress,
                 false,
-                &mut written,
+                (&mut written, &tally),
                 &mut reading,
                 &mut back,
             )

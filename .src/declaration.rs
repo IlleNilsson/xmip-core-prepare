@@ -63,6 +63,26 @@ pub const COMPRESSION_UNIT: &Declaration = &Declaration {
                 meaning: "The zip entry read, the first where none is named, or the name written.",
                 applies: Applies::Both,
             },
+            Setting {
+                name: "ceiling",
+                kind: Kind::Integer {
+                    minimum: 1,
+                    maximum: i64::MAX,
+                },
+                presence: Presence::Default(Fixed::Integer(1 << 30)),
+                meaning: "The most bytes one Stream decompresses to; 1 GiB unless set.",
+                applies: Applies::Both,
+            },
+            Setting {
+                name: "ratio",
+                kind: Kind::Integer {
+                    minimum: 1,
+                    maximum: 1_000_000,
+                },
+                presence: Presence::Default(Fixed::Integer(200)),
+                meaning: "The most bytes made per byte read, once a MiB is out; 200 unless set.",
+                applies: Applies::Both,
+            },
             direction(&["decompress", "compress"]),
         ],
     },

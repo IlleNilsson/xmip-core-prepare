@@ -32,6 +32,8 @@ mod direction;
 #[cfg(feature = "units")]
 mod gzip;
 #[cfg(feature = "units")]
+mod limit;
+#[cfg(feature = "units")]
 pub mod protection;
 #[cfg(feature = "units")]
 pub mod text_normalization;

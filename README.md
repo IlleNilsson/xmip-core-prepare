@@ -18,7 +18,7 @@ standard module's manifest (`xmip-core-unit`) is written from it.
 
 | Unit | Does | Settings |
 | --- | --- | --- |
-| `Compression` | decompresses on receive, compresses on send | `format` gzip, zlib, deflate, zstd or zip; `level` fastest, default, best; `entry`, a zip entry's name; `direction` |
+| `Compression` | decompresses on receive, compresses on send | `format` gzip, zlib, deflate, zstd or zip; `level` fastest, default, best; `entry`, a zip entry's name; `ceiling`, the most bytes one Stream decompresses to; `ratio`, the most bytes made per byte read; `direction` |
 | `CharacterEncoding` | reads the far end's encoding into UTF-8 on receive, writes it on send | `encoding`, any WHATWG label or `utf-16le`, `utf-16be`, `utf-32le`, `utf-32be`; `direction` |
 | `TransferEncoding` | decodes Base 64 on receive, encodes it on send | `format` base64 or base64url; `line_length`; `direction` |
 | `TextNormalization` | keeps, removes or adds the byte order mark, rewrites line endings | `byte_order_mark`; `line_ending` |
@@ -45,6 +45,15 @@ encoding and a character it cannot write, never replacing one (ADR-0038,
 amendment 2026-09-26); Transfer Encoding refuses a character outside its
 alphabet and anything after the padding; Compression refuses what is not
 compressed as named and a zip entry that does not match its check.
+
+**Bounded decompression.** A compression bomb is refused while it is read
+(`limit.rs`): every byte inflated — each gzip member's, each zip entry's,
+passed over or chosen, zlib's, raw deflate's and zstd's — counts against the
+step's `ceiling`, 1 GiB unless set, and once a mebibyte is out against its
+`ratio`, 200 bytes made per byte read unless set, both refused through
+`codec::ceiling::within`. Both are defaults only: a step whose partner sends
+larger Streams, or ones that compress better, sets its own. A gzip member's
+name or comment is read to 64 KiB at most.
 
 **Its dependencies, each chosen.** Deflate is `flate2`'s compressor and
 decompressor over its pure-Rust backend, driven here (`deflate.rs`) so a

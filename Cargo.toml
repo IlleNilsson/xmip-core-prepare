@@ -26,7 +26,9 @@ xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core
 # A unit as its crate declares it, and the stage of the message path it is
 # opened at.
 node = { package = "xmip-core-node", git = "https://github.com/IlleNilsson/xmip-core-node", branch = "main" }
-# Base 64 and the Unicode forms, spelled once for the estate.
+# Base 64 and the Unicode forms, spelled once for the estate, and its one
+# refusal of a size over what carries it (`codec::ceiling::within`), which
+# decompressing's ceiling and ratio are refused through.
 codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNilsson/xmip-core-library-codec", branch = "main", optional = true }
 # gzip, zlib and raw deflate, and the CRC-32 a zip entry is checked by, over
 # the pure-Rust backend (miniz_oxide): no C compiler, no unsafe of ours.
@@ -44,6 +46,14 @@ encoding_rs = { version = "0.8", optional = true }
 name = "measured"
 path = "tests/measured/main.rs"
 test = false
+required-features = ["units"]
+
+# Every unit carried in bounded memory: the units' code, which only the
+# units feature builds.
+[[test]]
+name = "bounded"
+path = "tests/bounded.rs"
+required-features = ["units"]
 
 [dev-dependencies]
 # The counting allocator and the one latency spread the estate's tests

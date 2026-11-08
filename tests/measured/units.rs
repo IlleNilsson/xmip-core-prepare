@@ -65,11 +65,16 @@ pub fn given(settings: &[(&str, &str)]) -> Vec<(String, Given)> {
 
 /// The units and settings carried, each both ways.
 pub const CARRIED: &[(&str, &[(&str, &str)])] = &[
-    ("Compression", &[("format", "gzip")]),
-    ("Compression", &[("format", "zlib")]),
-    ("Compression", &[("format", "deflate")]),
-    ("Compression", &[("format", "zstd")]),
-    ("Compression", &[("format", "zip")]),
+    // The carried text repeats every 64 bytes and compresses past any
+    // honest ratio, so the ratio is opened as wide as a step may set it.
+    ("Compression", &[("format", "gzip"), ("ratio", "1000000")]),
+    ("Compression", &[("format", "zlib"), ("ratio", "1000000")]),
+    (
+        "Compression",
+        &[("format", "deflate"), ("ratio", "1000000")],
+    ),
+    ("Compression", &[("format", "zstd"), ("ratio", "1000000")]),
+    ("Compression", &[("format", "zip"), ("ratio", "1000000")]),
     ("CharacterEncoding", &[("encoding", "utf-16le")]),
     ("CharacterEncoding", &[("encoding", "windows-1252")]),
     ("TransferEncoding", &[("line_length", "76")]),

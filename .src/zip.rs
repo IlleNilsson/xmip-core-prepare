@@ -15,6 +15,7 @@ use std::io::{self, BufRead, Read, Write};
 use flate2::{Compress, Decompress};
 
 use crate::deflate::{Checked, CrcReader, deflate, inflate};
+use crate::limit::Tally;
 use crate::{PrepareError, copy};
 
 const LOCAL: u32 = 0x0403_4b50;
@@ -52,15 +53,17 @@ struct Local {
 
 /// Write the entry `wanted` names, or the first, from the archive `input`
 /// to `output`, its check verified, a deflated entry inflated by
-/// `decompress` through `written`.
+/// `decompress` through `written`. Every deflated entry is counted against
+/// `tally`, the ones passed over too: what they inflate to is work done.
 ///
 /// # Errors
 /// The archive ends before such an entry, an entry is neither stored nor
-/// deflated, its data does not match its check, or it cannot be read.
+/// deflated, its data does not match its check, the entries inflate past
+/// `tally`'s limit, or it cannot be read.
 pub(crate) fn read_entry(
     input: &mut dyn BufRead,
     wanted: Option<&str>,
-    (decompress, written): (&mut Decompress, &mut [u8]),
+    (decompress, written, tally): (&mut Decompress, &mut [u8], &Tally),
     output: &mut dyn Write,
 ) -> Result<u64, PrepareError> {
     let mut input = input;
@@ -83,8 +86,14 @@ pub(crate) fn read_entry(
                 )));
             }
             STORED => copy(NAME, &mut (&mut input).take(local.compressed), &mut checked)?,
-            DEFLATED => inflate(decompress, false, written, &mut *input, &mut checked)
-                .map_err(|failed| PrepareError::of_io(NAME, &failed))?,
+            DEFLATED => inflate(
+                decompress,
+                false,
+                (written, tally),
+                &mut *input,
+                &mut checked,
+            )
+            .map_err(|failed| PrepareError::of_io(NAME, &failed))?,
             other => {
                 return Err(refused(format!(
                     "the entry '{}' is compressed by method {other}, neither stored nor deflated",
