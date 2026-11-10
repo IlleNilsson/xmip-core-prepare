@@ -74,4 +74,4 @@ is opened. Keys are files the step names; nothing is looked up over a
 network — no key server, no online revocation check.
 
 `doc/architecture/runtime-model.md` section 8 governs Preparation; ADR-0066,
-amendments 2026-10-22, the units; `architecture.xmip` carries the maturity.
+amendments 2026-10-22, the units; `architecture.toml` carries the maturity.
