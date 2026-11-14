@@ -6,16 +6,17 @@
 //! payload silently changed.
 //!
 //! The encodings are the WHATWG Encoding Standard's, by any of its labels
-//! (`windows-1252`, `iso-8859-1`, `shift_jis`, …), through `encoding_rs`;
-//! the Unicode forms that standard does not write — UTF-16 out, and UTF-32
-//! both ways — are `xmip-core-library-codec`'s (`codec::unicode`). A byte
+//! (`windows-1252`, `iso-8859-1`, `shift_jis`, …), through the estate's one
+//! decoding of them, `codec::charset`, which the XML reader's edge reads
+//! through too; the Unicode forms that standard does not write — UTF-16
+//! out, and UTF-32 both ways — are `codec::unicode`'s. A byte
 //! order mark is carried over as U+FEFF, for Text Normalization to keep or
 //! remove.
 
 use std::io::{Read, Write};
 
+use codec::charset::{Charset, Decoded, Encoded};
 use codec::unicode::Form;
-use encoding_rs::{DecoderResult, EncoderResult, Encoding};
 
 use crate::declaration::{CHARACTER_ENCODING as NAME, CHARACTER_ENCODING_UNIT};
 use crate::direction::Direction;
@@ -28,8 +29,8 @@ pub const UNIT: PrepareUnit = PrepareUnit::new(CHARACTER_ENCODING_UNIT, open);
 /// Where an encoding is written and read.
 #[derive(Clone, Copy, Debug)]
 enum Named {
-    /// The WHATWG standard's, through `encoding_rs`.
-    Standard(&'static Encoding),
+    /// The WHATWG standard's, through `codec::charset`.
+    Standard(Charset),
     /// A Unicode form, through `codec::unicode`, where the standard does not
     /// write it.
     Form(Form),
@@ -64,16 +65,14 @@ fn open(stage: Stage, values: &Values) -> Result<Box<dyn Prepare>, String> {
     let label = values.text("encoding");
     let direction = Direction::of(NAME, stage, values, ["decode", "encode"])?;
     let form = Form::named(&label.to_ascii_lowercase()).ok();
-    let named = match (Encoding::for_label(label.as_bytes()), form) {
+    let named = match (Charset::named(label), form) {
         // UTF-32 is no WHATWG encoding, and UTF-16 is one the standard
         // reads and never writes.
         (_, Some(form @ (Form::Utf32Le | Form::Utf32Be))) => Named::Form(form),
         (_, Some(form @ (Form::Utf16Le | Form::Utf16Be))) if direction == Direction::Outward => {
             Named::Form(form)
         }
-        (Some(encoding), _)
-            if encoding.is_single_byte() || encoding.output_encoding() == encoding =>
-        {
+        (Some(encoding), _) if encoding.is_single_byte() || encoding.is_written() => {
             Named::Standard(encoding)
         }
         (Some(encoding), _) if direction == Direction::Inward => Named::Standard(encoding),
@@ -122,12 +121,12 @@ fn io(failed: &std::io::Error) -> PrepareError {
 }
 
 fn decode(
-    encoding: &'static Encoding,
+    encoding: Charset,
     pieces: &mut Pieces,
     input: &mut dyn Read,
     output: &mut dyn Write,
 ) -> Result<(), PrepareError> {
-    let mut decoder = encoding.new_decoder_without_bom_handling();
+    let mut decoder = encoding.decoder();
     let Pieces {
         read: chunk,
         written: text,
@@ -139,17 +138,16 @@ fn decode(
         let last = read == 0;
         let mut rest = &chunk[..read];
         loop {
-            let (result, consumed, written) =
-                decoder.decode_to_utf8_without_replacement(rest, text, last);
+            let (result, consumed, written) = decoder.decode(rest, text, last);
             output
                 .write_all(&text[..written])
                 .map_err(|failed| io(&failed))?;
             offset += consumed as u64;
             rest = &rest[consumed..];
             match result {
-                DecoderResult::InputEmpty => break,
-                DecoderResult::OutputFull => {}
-                DecoderResult::Malformed(length, _) => {
+                Decoded::InputEmpty => break,
+                Decoded::OutputFull => {}
+                Decoded::Malformed(length) => {
                     return Err(refused(format!(
                         "the bytes are not {} near byte {}",
                         encoding.name(),
@@ -165,12 +163,12 @@ fn decode(
 }
 
 fn encode(
-    encoding: &'static Encoding,
+    encoding: Charset,
     pieces: &mut Pieces,
     input: &mut dyn Read,
     output: &mut dyn Write,
 ) -> Result<(), PrepareError> {
-    let mut encoder = encoding.new_encoder();
+    let mut encoder = encoding.encoder();
     let Pieces {
         read,
         written: bytes,
@@ -179,16 +177,15 @@ fn encode(
     let mut utf8 = Utf8Pieces::new(read, text);
     while let Some((mut rest, last)) = utf8.next(input)? {
         loop {
-            let (result, consumed, written) =
-                encoder.encode_from_utf8_without_replacement(rest, bytes, last);
+            let (result, consumed, written) = encoder.encode(rest, bytes, last);
             output
                 .write_all(&bytes[..written])
                 .map_err(|failed| io(&failed))?;
             rest = &rest[consumed..];
             match result {
-                EncoderResult::InputEmpty => break,
-                EncoderResult::OutputFull => {}
-                EncoderResult::Unmappable(character) => {
+                Encoded::InputEmpty => break,
+                Encoded::OutputFull => {}
+                Encoded::Unmappable(character) => {
                     return Err(refused(format!(
                         "{} cannot write U+{:04X}",
                         encoding.name(),

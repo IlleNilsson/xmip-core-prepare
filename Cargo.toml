@@ -17,7 +17,7 @@ path = ".src/lib.rs"
 # The units' code and what it is built on. Without it the crate is its units'
 # declarations alone, which configure reads the standard module by.
 default = ["units"]
-units = ["dep:codec", "dep:flate2", "dep:ruzstd", "dep:encoding_rs"]
+units = ["dep:codec", "dep:flate2", "dep:ruzstd"]
 
 [dependencies]
 # The error is declared once, in core (ADR-0037), and a unit's settings in
@@ -26,7 +26,9 @@ xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core
 # A unit as its crate declares it, and the stage of the message path it is
 # opened at.
 node = { package = "xmip-core-node", git = "https://github.com/IlleNilsson/xmip-core-node", branch = "main" }
-# Base 64 and the Unicode forms, spelled once for the estate, and its one
+# Base 64, the Unicode forms and the WHATWG encodings (`codec::charset`,
+# read and written a piece at a time and strictly: what a legacy partner's
+# text arrives in), spelled once for the estate, and its one
 # refusal of a size over what carries it (`codec::ceiling::within`), which
 # decompressing's ceiling and ratio are refused through.
 codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNilsson/xmip-core-library-codec", branch = "main", optional = true }
@@ -35,9 +37,6 @@ codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNil
 flate2 = { version = "1.1", default-features = false, features = ["rust_backend"], optional = true }
 # zstd in Rust, both ways, where the zstd crate binds the C library.
 ruzstd = { version = "0.9", optional = true }
-# The WHATWG Encoding Standard's encodings, read and written a piece at a
-# time and strictly: what a legacy partner's text arrives in.
-encoding_rs = { version = "0.8", optional = true }
 
 # The module's timing program (doc/governance/rust-style.md section 5c): a
 # plain cargo test leaves it out, and the landing runs it after every other

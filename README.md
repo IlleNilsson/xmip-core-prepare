@@ -60,9 +60,9 @@ decompressor over its pure-Rust backend, driven here (`deflate.rs`) so a
 step keeps them; zlib's frame is the compressor's own, gzip's is written
 and read here (`gzip.rs`), and so is a zip entry (`zip.rs`), one entry
 being one Stream; zstd is `ruzstd`'s, Rust both ways, where the `zstd`
-crate binds the C library; the WHATWG
-encodings are `encoding_rs`'s; Base 64 and the Unicode forms are
-`xmip-core-library-codec`'s. None reaches a network (ADR-0045, amendment
+crate binds the C library; the WHATWG encodings, Base 64 and the Unicode
+forms are `xmip-core-library-codec`'s (`codec::charset`, the one decoding
+the XML reader's edge reads through too, over `encoding_rs`). None reaches a network (ADR-0045, amendment
 2026-10-22).
 
 **Engines.** Encryption and Signature work through an engine of the format
