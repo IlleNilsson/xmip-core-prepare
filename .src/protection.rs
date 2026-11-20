@@ -76,14 +76,13 @@ fn engine<'a>(
 }
 
 fn files(text: Option<&str>) -> Vec<PathBuf> {
-    text.map(|text| {
+    text.map_or_default(|text| {
         text.split(',')
             .map(str::trim)
             .filter(|file| !file.is_empty())
             .map(PathBuf::from)
             .collect()
     })
-    .unwrap_or_default()
 }
 
 /// Encryption opened for a step at `stage` with `values`, through one of

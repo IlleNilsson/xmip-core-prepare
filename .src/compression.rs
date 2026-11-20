@@ -289,7 +289,7 @@ mod tests {
         let mut output = Vec::new();
         let verdict = unit.prepare(&mut &input[..], &mut output);
         (
-            verdict.err().map(|e| e.to_string()).unwrap_or_default(),
+            verdict.err().map_or_default(|e| e.to_string()),
             output.len(),
         )
     }
